@@ -11,7 +11,10 @@ config = context.config
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 assert config.config_file_name is not None
-fileConfig(config.config_file_name)
+# Programmatic callers (the migration test) can skip this, because fileConfig
+# disables loggers that already exist in the running process.
+if config.attributes.get("configure_logger", True):
+    fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -31,7 +34,8 @@ target_metadata = SQLModel.metadata
 
 
 def get_url():
-    return str(settings.DATABASE_URL)
+    # Programmatic callers (the migration test) can target another database.
+    return config.attributes.get("database_url") or str(settings.DATABASE_URL)
 
 
 def run_migrations_offline():

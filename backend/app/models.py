@@ -1,8 +1,11 @@
 import uuid
 from datetime import UTC, datetime
 
-from pydantic import EmailStr
+from pydantic import EmailStr, computed_field, field_validator
+from sqlalchemy import CheckConstraint, Column, Enum
 from sqlmodel import Field, Relationship, SQLModel
+
+from app.core.permissions import Permission, Role, permissions_for
 
 
 def get_datetime_utc() -> datetime:
@@ -13,7 +16,7 @@ def get_datetime_utc() -> datetime:
 class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
     is_active: bool = True
-    is_superuser: bool = False
+    role: Role = Role.MEMBER
     full_name: str | None = Field(default=None, max_length=255)
 
 
@@ -32,9 +35,18 @@ class UserRegister(SQLModel):
 class UserUpdate(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     is_active: bool | None = None
-    is_superuser: bool | None = None
+    role: Role | None = None
     full_name: str | None = Field(default=None, max_length=255)
     password: str | None = Field(default=None, min_length=8, max_length=128)
+
+    @field_validator("role")
+    @classmethod
+    def role_not_null(cls, role: Role | None) -> Role:
+        # Omitting `role` keeps the current value; an explicit null is invalid
+        # because every user must have a role. (Validators skip omitted fields.)
+        if role is None:
+            raise ValueError("role cannot be null")
+        return role
 
 
 class UserUpdateMe(SQLModel):
@@ -49,7 +61,26 @@ class UpdatePassword(SQLModel):
 
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'manager', 'member')", name="ck_user_role"),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    role: Role = Field(
+        default=Role.MEMBER,
+        # Stored as VARCHAR(20) (no native enum type); loaded back as Role.
+        sa_column=Column(
+            Enum(
+                Role,
+                native_enum=False,
+                create_constraint=False,
+                length=20,
+                values_callable=lambda roles: [role.value for role in roles],
+            ),
+            nullable=False,
+            server_default=Role.MEMBER.value,
+        ),
+    )
     hashed_password: str
     created_at: datetime | None = Field(default_factory=get_datetime_utc)
     items: list[Item] = Relationship(back_populates="owner", cascade_delete=True)
@@ -59,6 +90,11 @@ class User(UserBase, table=True):
 class UserPublic(UserBase):
     id: uuid.UUID
     created_at: datetime | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def permissions(self) -> list[Permission]:
+        return permissions_for(self.role)
 
 
 class UsersPublic(SQLModel):

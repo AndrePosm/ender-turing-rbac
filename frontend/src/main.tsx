@@ -20,15 +20,33 @@ client.setConfig({
 })
 
 const handleApiError = (error: Error) => {
-  if (
-    error instanceof AxiosError &&
-    [401, 403].includes(error.response?.status ?? 0)
-  ) {
+  if (!(error instanceof AxiosError)) return
+  const status = error.response?.status
+  if (status === 401) {
+    // Session is no longer valid (expired, deactivated or deleted user).
     localStorage.removeItem("access_token")
-    window.location.href = "/login"
+    queryClient.clear()
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login"
+    }
+  } else if (status === 403) {
+    // Access may have changed: refresh permissions, then re-run route guards.
+    void queryClient
+      .invalidateQueries({ queryKey: ["currentUser"] })
+      .then(() => router.invalidate())
   }
 }
 const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Auth and permission errors won't change on retry; react immediately.
+      retry: (failureCount, error) =>
+        !(
+          error instanceof AxiosError &&
+          [401, 403].includes(error.response?.status ?? 0)
+        ) && failureCount < 3,
+    },
+  },
   queryCache: new QueryCache({
     onError: handleApiError,
   }),
@@ -37,7 +55,7 @@ const queryClient = new QueryClient({
   }),
 })
 
-const router = createRouter({ routeTree })
+const router = createRouter({ routeTree, context: { queryClient } })
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router

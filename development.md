@@ -42,6 +42,25 @@ Mailpit: <http://localhost:8025>
 
 The frontend development server uses the backend at `http://localhost:8000`, as configured in `frontend/.env`.
 
+### Roles and Access
+
+Users have one role: `admin` (manage users and roles, manage all items), `manager` (view users and metrics) or `member` (own profile and items). Rules live in `backend/app/core/permissions.py`; the backend enforces them and returns the user's `permissions` from `/api/v1/users/me` for the frontend.
+
+To try all three roles locally, create the demo accounts (development only). They use the `FIRST_SUPERUSER_PASSWORD` from `.env`. Existing accounts are never changed; mismatches are reported as conflicts:
+
+```bash
+cd backend
+uv run python -m app.seed_demo_users
+```
+
+Log in as `FIRST_SUPERUSER` (admin), `manager@example.com` or `member@example.com`.
+
+**API change:** `is_superuser` was replaced by `role` in user requests and responses. The migration turns existing superusers into admins and everyone else into members. Invalid, expired, inactive or deleted sessions now return `401` (previously `403`/`400`/`404`); `403` means the user lacks permission.
+
+**Deployment order:** stop the old backend, run migrations (`scripts/prestart.sh`), then start the new backend and frontend together. The old backend cannot run against the migrated schema.
+
+**Time spent:** approximately 1.5 hours, including local environment setup.
+
 ### Frontend Served by FastAPI
 
 Build the frontend from the `frontend` directory:
